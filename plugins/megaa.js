@@ -1,103 +1,107 @@
 const { cmd } = require('../command');
-const fs = require('fs');
-const path = require('path');
-const { File } = require('megajs');
+const { fetchJson } = require('../lib/functions');
 const axios = require('axios');
-const FormData = require('form-data');
-const config = require('../config');
+const fs = require('fs-extra');
+const path = require('path');
+const os = require('os');
+const FormData = require("form-data");
 
-// 🔁 Gofile uploader function
 async function uploadToGofile(filePath) {
-  try {
-    const { data: serverRes } = await axios.get('https://api.gofile.io/getServer');
-    const server = serverRes.data.data.server;
+    try {
+        const form = new FormData();
+        form.append("file", fs.createReadStream(filePath));
 
-    const form = new FormData();
-    form.append('file', fs.createReadStream(filePath));
+        const response = await axios.post("https://api.gofile.io/uploadFile", form, {
+            headers: form.getHeaders(),
+        });
 
-    const { data: uploadRes } = await axios.post(`https://${server}.gofile.io/uploadFile`, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      timeout: 2 * 60 * 1000
-    });
-
-    if (uploadRes.status === 'ok') {
-      return uploadRes.data.downloadPage;
-    } else {
-      console.error("Gofile Upload Fail:", uploadRes);
-      throw new Error('❌ Gofile upload failed.');
+        if (response.data.status === "ok") {
+            return response.data.data.downloadPage;
+        } else {
+            return null;
+        }
+    } catch (err) {
+        console.error("Gofile upload error:", err);
+        return null;
     }
-  } catch (err) {
-    console.error("Gofile Upload Error:", err);
-    throw err;
-  }
 }
 
-// 📥 MEGA downloader command
 cmd({
-  pattern: "mega",
-  alias: ["megadl"],
-  desc: "Download MEGA files & auto upload to gofile if large",
-  react: "📥",
-  category: "download",
-  filename: __filename
-}, async (conn, m, store, { from, q, reply }) => {
-  try {
-    if (!q || !q.includes('mega.nz')) {
-      return reply("❌ වලංගු MEGA.nz ලින්ක් එකක් දෙන්න.");
-    }
-
-    await conn.sendMessage(from, { react: { text: "⏳", key: m.key } });
-
-    const file = File.fromURL(q);
-    await file.loadAttributes();
-
-    const fileName = file.name || "mega_file";
-    const fileSize = file.size || 0;
-    const savePath = path.join(__dirname, '..', 'tmp', fileName);
-
-    const writeStream = fs.createWriteStream(savePath);
-    const downloadStream = file.download();
-    downloadStream.pipe(writeStream);
-
-    downloadStream.on('error', (e) => {
-      console.error("MEGA Download Error:", e);
-      reply("❌ MEGA download fail.");
-    });
-
-    downloadStream.on('end', async () => {
-      if (fileSize > 100 * 1024 * 1024) {
-        await conn.sendMessage(from, { text: `⚠️ ගොනුව ${(fileSize / 1024 / 1024).toFixed(2)}MB බැරයි, gofile.io වෙත upload වෙමින්...` });
-
-        try {
-          const url = await uploadToGofile(savePath);
-          await conn.sendMessage(from, {
-            text:
-              `📁 *MEGA File:* ${fileName}\n` +
-              `📦 *Size:* ${(fileSize / 1024 / 1024).toFixed(2)} MB\n` +
-              `🔗 *Download Link:* ${url}\n\n${config.FOOTER}`
-          }, { quoted: m });
-        } catch {
-          reply("❌ gofile.io වෙත upload කිරීම අසාර්ථකයි.");
+    pattern: "ssub",
+    alias: ["sinhalasub", "sinmovie"],
+    react: '🎥',
+    category: "download",
+    desc: "Download SinhalaSub movies",
+    filename: __filename
+}, async (conn, m, mek, { from, q, reply }) => {
+    try {
+        if (!q || !q.includes('sinhalasub.lk')) {
+            return await reply('❌ කරුණාකර *sinhalasub.lk* ලින්ක් එකක් ලබාදෙන්න.');
         }
 
-        fs.unlink(savePath, () => {});
-      } else {
-        await conn.sendMessage(from, {
-          document: { url: savePath },
-          fileName: fileName,
-          mimetype: "application/octet-stream",
-          caption: `📁 *MEGA File:* ${fileName}\n📦 *Size:* ${(fileSize / 1024 / 1024).toFixed(2)} MB\n\n${config.FOOTER}`
-        }, { quoted: m });
+        await reply("🔄 Download link generate වෙමින්...");
 
-        await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
-        fs.unlink(savePath, () => {});
-      }
-    });
+        const apiUrl = `https://supun-md-mv.vercel.app/api/sinhalasub/dl?url=${encodeURIComponent(q)}`;
+        const apiRes = await fetchJson(apiUrl);
 
-  } catch (error) {
-    console.error("MEGA CMD ERROR:", error);
-    reply("❌ ගොනුව ලබාගැනීමේදී දෝෂයක් සිදු විය.");
-  }
+        if (!apiRes || !apiRes.url || !apiRes.name) {
+            return await reply("❌ Download link ලබාගැනීම අසාර්ථකයි.");
+        }
+
+        const fileUrl = apiRes.url;
+        const fileName = apiRes.name.endsWith(".mp4") || apiRes.name.endsWith(".mkv")
+            ? apiRes.name
+            : apiRes.name + ".mp4";
+
+        const filePath = path.join(os.tmpdir(), fileName);
+        await reply(`📥 බාගත කරමින්: *${fileName}*`);
+
+        const writer = fs.createWriteStream(filePath);
+        const { data } = await axios({
+            url: fileUrl,
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        data.pipe(writer);
+
+        writer.on('finish', async () => {
+            const stats = fs.statSync(filePath);
+            const fileSizeMB = stats.size / (1024 * 1024);
+
+            if (fileSizeMB > 100) {
+                await reply(`⚠️ ගොනුව ${fileSizeMB.toFixed(2)}MB බැරයි, gofile.io වෙත upload වෙමින්...`);
+
+                const gofileLink = await uploadToGofile(filePath);
+
+                if (gofileLink) {
+                    await conn.sendMessage(from, {
+                        text: `✅ *${fileName}* uploaded successfully!\n📥 Download: ${gofileLink}`,
+                        quoted: mek
+                    });
+                } else {
+                    await reply("❌ gofile.io වෙත upload කිරීම අසාර්ථකයි.");
+                }
+
+                fs.unlinkSync(filePath);
+            } else {
+                await conn.sendMessage(from, {
+                    document: fs.readFileSync(filePath),
+                    mimetype: 'video/mp4',
+                    fileName: fileName,
+                    caption: `🎬 *${fileName}*\n✅ SinhalaSub Download Complete!`,
+                    quoted: mek
+                });
+                fs.unlinkSync(filePath);
+            }
+        });
+
+        writer.on('error', async (err) => {
+            console.error("Download Error:", err);
+            await reply('❌ Movie එක බාගත වෙද්දී දෝෂයක් සිදු විය.');
+        });
+    } catch (error) {
+        console.error("Plugin Error:", error);
+        await reply('❌ අභ්‍යන්තර දෝෂයක්. පසුව නැවත උත්සහ කරන්න.');
+    }
 });
