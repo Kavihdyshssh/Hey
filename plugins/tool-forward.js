@@ -1,4 +1,8 @@
 const { cmd } = require("../command");
+const {
+  generateForwardMessageContent,
+  generateWAMessageFromContent
+} = require("@whiskeysockets/baileys");
 
 cmd({
   pattern: "forward",
