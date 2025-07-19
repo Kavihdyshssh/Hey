@@ -421,7 +421,7 @@ cmd({
 
     await conn.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
-    const apiUrl = `https://api.fgmods.xyz/api/downloader/gdrive?url=${q}&apikey=fg_ulwCawIh`;
+    const apiUrl = `https://api.fgmods.xyz/api/downloader/gdrive?url=${q}&apikey=fg_OUDFdFNC`;
     const response = await axios.get(apiUrl);
     const downloadUrl = response.data.result.downloadUrl;
 
