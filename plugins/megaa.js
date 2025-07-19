@@ -1,42 +1,57 @@
-const axios = require("axios");
 const { cmd } = require('../command');
 const config = require('../config');
+const fs = require('fs');
+const path = require('path');
+const { File } = require('megajs');
 
 cmd({
   pattern: "mega",
   alias: ["megadl"],
   desc: "Download from Mega.nz",
-  react: "📦",
+  react: "📥",
   category: "download",
   filename: __filename
 }, async (conn, m, store, { from, q, reply }) => {
   try {
-    if (!q || !q.includes("mega.nz")) {
-      return reply("❌ Mega.nz ලින්ක් එකක් දෙන්න.");
+    if (!q || !q.includes('mega.nz')) {
+      return reply("❌ කරුණාකර සත්‍ය MEGA.nz ලින්ක් එකක් ලබාදෙන්න.");
     }
 
     await conn.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-    const res = await axios.get(`https://api.gura.site/api/dl/mega?url=${encodeURIComponent(q)}`);
-    const data = res.data;
+    const file = File.fromURL(q);
+    await file.loadAttributes();
 
-    if (!data.status || !data.result || !data.result.url) {
-      return reply("⚠️ ලින්ක් එකෙන් ගොනුව ගැනීමේදී දෝෂයක්. කරුණාකර පරක්කු වී නැවත උත්සාහ කරන්න.");
-    }
+    const fileName = file.name || "mega_download";
+    const fileSize = file.size || 0;
+    const savePath = path.join(__dirname, '..', 'tmp', fileName);
 
-    const { url, filename, mimetype, filesize } = data.result;
+    const writeStream = fs.createWriteStream(savePath);
+    const downloadStream = file.download();
 
-    await conn.sendMessage(from, {
-      document: { url },
-      mimetype: mimetype || "application/octet-stream",
-      fileName: filename || "mega_file",
-      caption: `📁 *File Name:* ${filename}\n📦 *Size:* ${filesize}\n\n${config.FOOTER}`
-    }, { quoted: m });
+    downloadStream.pipe(writeStream);
 
-    await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
+    downloadStream.on('end', async () => {
+      await conn.sendMessage(from, {
+        document: { url: savePath },
+        mimetype: "application/octet-stream",
+        fileName: fileName,
+        caption: `📥 *MEGA File:* ${fileName}\n📦 *Size:* ${(fileSize / (1024 * 1024)).toFixed(2)} MB\n\n${config.FOOTER}`
+      }, { quoted: m });
+
+      await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+      // Optional: Delete temp file after sending
+      fs.unlink(savePath, () => {});
+    });
+
+    downloadStream.on('error', err => {
+      console.error("MEGA Download Error:", err);
+      reply("❌ ගොනුව බාගැනීමේදී දෝෂයක් සිදු විය.");
+    });
 
   } catch (error) {
-    console.error("MEGA ERROR:", error);
-    reply("❌ ගොනුව ලබාගැනීමේදී දෝෂයක් සිදු විය.");
+    console.error("MEGA Error:", error);
+    reply("❌ MEGA link එක ක්‍රියාවට නැහැ. කරුණාකර link එක සත්‍යද බලන්න.");
   }
 });
