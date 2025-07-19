@@ -1,32 +1,45 @@
-const { cmd } = require("../command");
-const {
-  generateForwardMessageContent,
-  generateWAMessageFromContent
-} = require("@whiskeysockets/baileys");
+const { cmd, commands } = require('../command');
+const { File } = require("megajs");
 
 cmd({
-  pattern: "vi",
-  alias: ["fwd"],
-  react: "📤",
-  desc: "Forward a quoted message to the given JID",
-  category: "general",
-  use: ".forward <jid>",
-  filename: __filename,
-}, async (conn, m, { q, quoted, reply }) => {
-  if (!q) return reply("📥 *Enter a valid JID (e.g., 1203xxxxxx@g.us)*");
-  if (!quoted) return reply("🔁 *Reply to the message you want to forward.*");
+    pattern: "mega",
+    desc: "commands panel",
+    react: "🎀",
+    filename: __filename
+},
+async (conn, mek, m, { from, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply }) => {
+    try {
+    // Validate the provided URL
+    if (!q || !isUrl(q) || !q.includes("mega.nz")) {
+      return reply("Please provide a valid Mega.nz file URL.");
+    }
 
-  try {
-    const content = await generateForwardMessageContent(quoted, true);
-    const waMessage = await generateWAMessageFromContent(q, content, {
-      userJid: conn.user.id,
-      messageId: quoted.key.id
+    // Extract file URL and decryption key
+    const [fileUrl, decryptionKey] = q.split('#');
+    if (!decryptionKey) {
+      return reply("Error: Decryption key is missing in the provided URL.");
+    }
+
+    // Start file download
+    const megaFile = File.fromURL(fileUrl + '#' + decryptionKey);
+    megaFile.on("progress", (downloaded, total) => {
+      const progressPercentage = ((downloaded / total) * 100).toFixed(2);
+      reply(`Downloading: ${progressPercentage}% (${(downloaded / 1024 / 1024).toFixed(2)} MB of ${(total / 1024 / 1024).toFixed(2)} MB)`);
     });
 
-    await conn.relayMessage(q, waMessage.message, { messageId: waMessage.key.id });
-    await reply("✅ Message forwarded successfully!");
-  } catch (err) {
-    console.error(err);
-    await reply("❌ Failed to forward message.");
+    // Download file and send it
+    const fileBuffer = await megaFile.downloadBuffer();
+    const documentMessage = {
+      document: fileBuffer,
+      mimetype: "application/octet-stream",
+      fileName: "mega_downloaded_file"
+    };
+
+    const options = { quoted: message };
+    await conn.sendMessage(from, documentMessage, options);
+    reply("*create by laksidu*");
+  } catch (error) {
+    console.error(error);
+    reply("Error: " + error.message);
   }
 });
